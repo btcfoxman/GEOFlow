@@ -133,6 +133,11 @@ web_port="${web_port:-18080}"
 for _ in $(seq 1 40); do
   if curl -fsS "http://127.0.0.1:${web_port}/up" >/dev/null 2>&1; then
     docker compose exec -T app php artisan migrate:status --no-ansi >/dev/null
+    auth_probe_status="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${web_port}/api/v1/integrations/content-jobs/00000000-0000-4000-8000-000000000001")"
+    if [ "${auth_probe_status}" != "401" ]; then
+      log "Integration API unauthenticated probe returned ${auth_probe_status}, expected 401"
+      exit 1
+    fi
     docker compose ps
     log "Deployment complete"
     exit 0

@@ -51,6 +51,15 @@ class ApiV1ContractTest extends TestCase
             ->assertJsonPath('error.code', 'unauthorized');
     }
 
+    public function test_unknown_api_route_returns_not_found_envelope(): void
+    {
+        $this->getJson('/api/v1/not-a-route')
+            ->assertStatus(404)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('error.code', 'not_found')
+            ->assertJsonStructure(['meta' => ['request_id', 'timestamp']]);
+    }
+
     public function test_login_validation_empty_credentials(): void
     {
         $this->postJson('/api/v1/auth/login', [])

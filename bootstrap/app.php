@@ -72,7 +72,14 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $exceptions->render(function (NotFoundHttpException $e, Request $request) {
             if ($request->is('api/*')) {
-                return null;
+                $rid = (string) ($request->attributes->get('request_id') ?? Str::uuid()->toString());
+
+                return ApiResponse::error(
+                    'not_found',
+                    '资源不存在',
+                    $rid,
+                    404
+                )->withHeaders(['X-Request-Id' => $rid]);
             }
 
             $adminPrefix = trim((string) config('geoflow.admin_base_path', '/geo_admin'), '/');
