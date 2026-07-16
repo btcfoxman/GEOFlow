@@ -51,6 +51,8 @@ class IntegrationContentJobApiTest extends TestCase
 
     public function test_create_show_and_finalize_content_job(): void
     {
+        $this->withoutExceptionHandling();
+
         $token = $this->token(['integrations:read', 'integrations:write', 'integrations:finalize']);
         $payload = $this->createPayload('package-001', 'v1');
 
