@@ -37,6 +37,8 @@ jobs:
           tools: composer:v2
 
       - name: Install dependencies
+        env:
+          BROADCAST_CONNECTION: 'null'
         run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Run tests
