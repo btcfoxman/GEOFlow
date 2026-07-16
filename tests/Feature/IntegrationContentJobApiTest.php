@@ -6,7 +6,9 @@ use App\Models\Admin;
 use App\Models\Author;
 use App\Models\Category;
 use App\Services\Api\IdempotencyService;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -28,6 +30,19 @@ class IntegrationContentJobApiTest extends TestCase
             'app.key' => 'base64:'.base64_encode(str_repeat('g', 32)),
             'geoflow.integration_callback_allowed_hosts' => ['orchestration-service'],
         ]);
+
+        // The legacy PostgreSQL bootstrap owns this table in production, but
+        // its SQLite compatibility path intentionally omits review history.
+        if (! Schema::hasTable('article_reviews')) {
+            Schema::create('article_reviews', function (Blueprint $table): void {
+                $table->id();
+                $table->unsignedBigInteger('article_id');
+                $table->unsignedBigInteger('admin_id');
+                $table->string('review_status', 20);
+                $table->text('review_note')->default('');
+                $table->timestamp('created_at')->nullable();
+            });
+        }
 
         $this->admin = Admin::query()->create([
             'username' => 'integration_admin',
