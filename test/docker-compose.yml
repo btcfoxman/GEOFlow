@@ -43,6 +43,10 @@ services:
   web:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-btcfoxman}/geoflow-web:${IMAGE_TAG:-test-latest}
     container_name: geoflow-test-web
+    # The legacy 192.168.3.6 Docker seccomp profile rejects nginx pwrite64.
+    # Keep the exception scoped to the disposable test gateway container.
+    security_opt:
+      - seccomp=unconfined
     ports:
       - "${WEB_PORT:-18080}:80"
     volumes:
