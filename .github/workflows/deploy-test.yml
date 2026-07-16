@@ -39,8 +39,19 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Build frontend assets
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
       - name: Run tests
         run: php artisan test

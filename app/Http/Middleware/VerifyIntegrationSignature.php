@@ -68,6 +68,10 @@ class VerifyIntegrationSignature
 
     private function canonicalBody(Request $request): string
     {
+        if (in_array(strtoupper($request->method()), ['GET', 'HEAD'], true)) {
+            return '';
+        }
+
         if ($request->getContent() === '') {
             return '';
         }
