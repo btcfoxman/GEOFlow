@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\ArticleController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CatalogController;
 use App\Http\Controllers\Api\V1\JobController;
+use App\Http\Controllers\Api\V1\IntegrationContentJobController;
 use App\Http\Controllers\Api\V1\MaterialController;
 use App\Http\Controllers\Api\V1\TaskController;
 use Illuminate\Support\Facades\Route;
@@ -58,6 +59,23 @@ Route::prefix('v1')
             Route::get('jobs/{job}', [JobController::class, 'show'])
                 ->whereNumber('job')
                 ->middleware('api.scope:jobs:read');
+
+            // integrations:* — orchestration 一次性内容包投影、确认与取消
+            Route::prefix('integrations')
+                ->middleware('api.integration_signature')
+                ->group(function (): void {
+                    Route::post('content-jobs', [IntegrationContentJobController::class, 'store'])
+                        ->middleware('api.scope:integrations:write');
+                    Route::get('content-jobs/{contentJob}', [IntegrationContentJobController::class, 'show'])
+                        ->whereUuid('contentJob')
+                        ->middleware('api.scope:integrations:read');
+                    Route::post('content-jobs/{contentJob}/finalize', [IntegrationContentJobController::class, 'finalize'])
+                        ->whereUuid('contentJob')
+                        ->middleware('api.scope:integrations:finalize');
+                    Route::post('content-jobs/{contentJob}/cancel', [IntegrationContentJobController::class, 'cancel'])
+                        ->whereUuid('contentJob')
+                        ->middleware('api.scope:integrations:write');
+                });
 
             // materials:* — 后台素材库 CRUD 与库内条目管理
             Route::get('materials', [MaterialController::class, 'summary'])->middleware('api.scope:materials:read');

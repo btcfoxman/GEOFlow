@@ -1,0 +1,205 @@
+name: Deploy Test
+
+on:
+  push:
+    branches:
+      - test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: geoflow-test
+  cancel-in-progress: false
+
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+  IMAGE_TAG_LATEST: test-latest
+
+jobs:
+  test:
+    name: Run contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_sqlite, sqlite3
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run tests
+        run: php artisan test
+
+  build:
+    name: Build images
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: geoflow-app
+            dockerfile: docker/Dockerfile.prod
+          - name: geoflow-web
+            dockerfile: docker/nginx/Dockerfile.prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ secrets.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || github.token }}
+
+      - name: Prepare image metadata
+        id: meta
+        shell: bash
+        run: |
+          short_sha="$(git rev-parse --short HEAD)"
+          echo "image=${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${{ matrix.name }}" >> "${GITHUB_OUTPUT}"
+          echo "image_sha_tag=test-${short_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ env.IMAGE_TAG_LATEST }}
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.image_sha_tag }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false
+          sbom: false
+
+  deploy:
+    name: Deploy to 192.168.3.6
+    needs: build
+    environment: test
+    runs-on:
+      - self-hosted
+      - linux
+      - aitoearn-test
+    env:
+      APP_DIR: /home/btcfoxman/docker/geoflow
+      IMAGE_REGISTRY: ghcr.io
+      IMAGE_NAMESPACE: ${{ github.repository_owner }}
+      IMAGE_TAG: test-latest
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+    steps:
+      - name: Fetch deployment files
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_name="${GITHUB_REPOSITORY##*/}"
+          work_dir="${RUNNER_TEMP:-/tmp}/${repo_name}-repo-${GITHUB_RUN_ID}"
+          rm -rf "${work_dir}"
+          mkdir -p "${work_dir}"
+
+          auth_config="${work_dir}/.curl-auth"
+          {
+            printf 'header = "Authorization: Bearer %s"\n' "${CHECKOUT_TOKEN}"
+            printf 'header = "Accept: application/vnd.github.raw"\n'
+            printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+          } > "${auth_config}"
+          chmod 600 "${auth_config}"
+
+          download_file() {
+            local path="$1"
+            mkdir -p "${work_dir}/$(dirname "${path}")"
+            curl --config "${auth_config}" \
+              --fail --location --silent --show-error \
+              --retry 5 --retry-delay 5 --connect-timeout 20 --max-time 120 \
+              -o "${work_dir}/${path}" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${GITHUB_SHA}"
+          }
+
+          for file in test/deploy.sh test/docker-compose.yml test/.env.example
+          do
+            download_file "${file}"
+          done
+
+          rm -f "${auth_config}"
+          chmod +x "${work_dir}/test/deploy.sh"
+          echo "REPO_WORK_DIR=${work_dir}" >> "${GITHUB_ENV}"
+
+      - name: Deploy
+        env:
+          GEOFLOW_CONFIG_VARS_JSON: ${{ toJSON(vars) }}
+          SECRET_APP_KEY: ${{ secrets.APP_KEY }}
+          SECRET_GEOFLOW_ADMIN_PASSWORD: ${{ secrets.GEOFLOW_ADMIN_PASSWORD }}
+          SECRET_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SECRET_REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          SECRET_REVERB_APP_KEY: ${{ secrets.REVERB_APP_KEY }}
+          SECRET_REVERB_APP_SECRET: ${{ secrets.REVERB_APP_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "${APP_DIR}"
+          export GEOFLOW_ENV_TEMPLATE="${REPO_WORK_DIR}/test/.env.example"
+          export GEOFLOW_ENV_DEST="${APP_DIR}/.env"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          template_path = Path(os.environ["GEOFLOW_ENV_TEMPLATE"])
+          destination = Path(os.environ["GEOFLOW_ENV_DEST"])
+          variables = json.loads(os.environ.get("GEOFLOW_CONFIG_VARS_JSON") or "{}")
+          secrets = {
+              "APP_KEY": os.environ.get("SECRET_APP_KEY", ""),
+              "GEOFLOW_ADMIN_PASSWORD": os.environ.get("SECRET_GEOFLOW_ADMIN_PASSWORD", ""),
+              "DB_PASSWORD": os.environ.get("SECRET_DB_PASSWORD", ""),
+              "REDIS_PASSWORD": os.environ.get("SECRET_REDIS_PASSWORD", ""),
+              "REVERB_APP_KEY": os.environ.get("SECRET_REVERB_APP_KEY", ""),
+              "REVERB_APP_SECRET": os.environ.get("SECRET_REVERB_APP_SECRET", ""),
+          }
+          missing = sorted(key for key, value in secrets.items() if not value)
+          if missing:
+              raise SystemExit("Missing required GEOFlow test secrets: " + ", ".join(missing))
+
+          output = []
+          for raw_line in template_path.read_text(encoding="utf-8").splitlines():
+              if not raw_line or raw_line.lstrip().startswith("#") or "=" not in raw_line:
+                  output.append(raw_line)
+                  continue
+              key, default = raw_line.split("=", 1)
+              if key in secrets:
+                  value = secrets[key]
+              else:
+                  value = str(variables.get(key, default))
+              if "\n" in value or "\r" in value:
+                  raise SystemExit(f"GEOFlow setting {key} must be single-line")
+              output.append(f"{key}={value}")
+
+          temp = destination.with_suffix(".env.tmp")
+          temp.write_text("\n".join(output) + "\n", encoding="utf-8")
+          os.chmod(temp, 0o600)
+          os.replace(temp, destination)
+          PY
+          cd "${REPO_WORK_DIR}"
+          bash test/deploy.sh

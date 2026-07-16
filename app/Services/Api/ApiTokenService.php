@@ -182,6 +182,9 @@ class ApiTokenService
             'articles:publish',
             'materials:read',
             'materials:write',
+            'integrations:read',
+            'integrations:write',
+            'integrations:finalize',
         ];
     }
 
