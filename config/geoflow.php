@@ -132,6 +132,12 @@ return [
     'api_login_rate_limit_decay_seconds' => (int) env('GEOFLOW_API_LOGIN_RATE_LIMIT_DECAY', 60),
     // API Token 默认有效期（天）
     'api_token_default_ttl_days' => (int) env('GEOFLOW_API_TOKEN_DEFAULT_TTL_DAYS', 30),
+    // orchestration 集成签名允许的最大时钟偏差，以及回调主机白名单。
+    'integration_signature_clock_skew_seconds' => max(30, (int) env('GEOFLOW_INTEGRATION_SIGNATURE_CLOCK_SKEW', 300)),
+    'integration_callback_allowed_hosts' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('GEOFLOW_INTEGRATION_CALLBACK_ALLOWED_HOSTS', 'orchestration-service'))
+    ), static fn (string $host): bool => $host !== '')),
     // 会话空闲超时（秒）
     'session_timeout_seconds' => (int) env('GEOFLOW_SESSION_TIMEOUT', 2592000),
 

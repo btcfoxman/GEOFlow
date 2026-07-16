@@ -12,6 +12,7 @@ use App\Http\Middleware\AssignApiRequestId;
 use App\Http\Middleware\AuthenticateAdminWeb;
 use App\Http\Middleware\AuthenticateApiToken;
 use App\Http\Middleware\EnsureApiScope;
+use App\Http\Middleware\VerifyIntegrationSignature;
 use App\Http\Middleware\EnsureSuperAdmin;
 use App\Http\Middleware\LogAdminActivity;
 use App\Http\Middleware\RecordSiteViewLog;
@@ -42,6 +43,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'api.auth' => AuthenticateApiToken::class,
             // 校验 Token scopes，如 api.scope:catalog:read
             'api.scope' => EnsureApiScope::class,
+            // orchestration 集成请求的时间戳、Nonce 与 HMAC 校验
+            'api.integration_signature' => VerifyIntegrationSignature::class,
             // Blade 后台：管理员会话鉴权（失败跳转 admin.login）
             'admin.auth' => AuthenticateAdminWeb::class,
             // Blade 后台：session locale
@@ -69,7 +72,14 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $exceptions->render(function (NotFoundHttpException $e, Request $request) {
             if ($request->is('api/*')) {
-                return null;
+                $rid = (string) ($request->attributes->get('request_id') ?? Str::uuid()->toString());
+
+                return ApiResponse::error(
+                    'not_found',
+                    '资源不存在',
+                    $rid,
+                    404
+                )->withHeaders(['X-Request-Id' => $rid]);
             }
 
             $adminPrefix = trim((string) config('geoflow.admin_base_path', '/geo_admin'), '/');
