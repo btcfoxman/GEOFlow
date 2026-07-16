@@ -163,57 +163,30 @@ jobs:
 
       - name: Deploy
         env:
-          GEOFLOW_CONFIG_VARS_JSON: ${{ toJSON(vars) }}
-          SECRET_APP_KEY: ${{ secrets.APP_KEY }}
-          SECRET_GEOFLOW_ADMIN_PASSWORD: ${{ secrets.GEOFLOW_ADMIN_PASSWORD }}
-          SECRET_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          SECRET_REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-          SECRET_REVERB_APP_KEY: ${{ secrets.REVERB_APP_KEY }}
-          SECRET_REVERB_APP_SECRET: ${{ secrets.REVERB_APP_SECRET }}
+          GEOFLOW_ENV_FILE_B64: ${{ secrets.GEOFLOW_ENV_FILE_B64 }}
         shell: bash
         run: |
           set -euo pipefail
           install -d -m 700 "${APP_DIR}"
-          export GEOFLOW_ENV_TEMPLATE="${REPO_WORK_DIR}/test/.env.example"
-          export GEOFLOW_ENV_DEST="${APP_DIR}/.env"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+          if [ -z "${GEOFLOW_ENV_FILE_B64}" ]; then
+            echo "Missing required GEOFlow test secret: GEOFLOW_ENV_FILE_B64" >&2
+            exit 1
+          fi
 
-          template_path = Path(os.environ["GEOFLOW_ENV_TEMPLATE"])
-          destination = Path(os.environ["GEOFLOW_ENV_DEST"])
-          variables = json.loads(os.environ.get("GEOFLOW_CONFIG_VARS_JSON") or "{}")
-          secrets = {
-              "APP_KEY": os.environ.get("SECRET_APP_KEY", ""),
-              "GEOFLOW_ADMIN_PASSWORD": os.environ.get("SECRET_GEOFLOW_ADMIN_PASSWORD", ""),
-              "DB_PASSWORD": os.environ.get("SECRET_DB_PASSWORD", ""),
-              "REDIS_PASSWORD": os.environ.get("SECRET_REDIS_PASSWORD", ""),
-              "REVERB_APP_KEY": os.environ.get("SECRET_REVERB_APP_KEY", ""),
-              "REVERB_APP_SECRET": os.environ.get("SECRET_REVERB_APP_SECRET", ""),
-          }
-          missing = sorted(key for key, value in secrets.items() if not value)
-          if missing:
-              raise SystemExit("Missing required GEOFlow test secrets: " + ", ".join(missing))
+          env_temp="${APP_DIR}/.env.tmp.${GITHUB_RUN_ID}"
+          umask 077
+          printf '%s' "${GEOFLOW_ENV_FILE_B64}" | base64 --decode > "${env_temp}"
+          unset GEOFLOW_ENV_FILE_B64
 
-          output = []
-          for raw_line in template_path.read_text(encoding="utf-8").splitlines():
-              if not raw_line or raw_line.lstrip().startswith("#") or "=" not in raw_line:
-                  output.append(raw_line)
-                  continue
-              key, default = raw_line.split("=", 1)
-              if key in secrets:
-                  value = secrets[key]
-              else:
-                  value = str(variables.get(key, default))
-              if "\n" in value or "\r" in value:
-                  raise SystemExit(f"GEOFlow setting {key} must be single-line")
-              output.append(f"{key}={value}")
+          for required_key in APP_KEY GEOFLOW_ADMIN_PASSWORD DB_PASSWORD REDIS_PASSWORD REVERB_APP_KEY REVERB_APP_SECRET; do
+            if ! grep -Eq "^${required_key}=.+" "${env_temp}"; then
+              echo "Decoded GEOFlow environment is missing ${required_key}" >&2
+              rm -f "${env_temp}"
+              exit 1
+            fi
+          done
+          chmod 600 "${env_temp}"
+          mv -f "${env_temp}" "${APP_DIR}/.env"
 
-          temp = destination.with_suffix(".env.tmp")
-          temp.write_text("\n".join(output) + "\n", encoding="utf-8")
-          os.chmod(temp, 0o600)
-          os.replace(temp, destination)
-          PY
           cd "${REPO_WORK_DIR}"
           bash test/deploy.sh
