@@ -16,9 +16,31 @@ x-app-base: &app-base
   restart: unless-stopped
 
 services:
+  geoflow-db:
+    image: pgvector/pgvector:pg16
+    container_name: geoflow-test-db
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE is required}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - geoflow-db-data:/var/lib/postgresql/data
+    networks:
+      - shared
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
   init:
     <<: *app-base
     container_name: geoflow-test-init
+    depends_on:
+      geoflow-db:
+        condition: service_healthy
     env_file:
       - ./.env
     environment:
@@ -96,3 +118,7 @@ networks:
   shared:
     external: true
     name: ${SHARED_NETWORK_NAME:-my-shared-net}
+
+volumes:
+  geoflow-db-data:
+    name: geoflow-test-db-data

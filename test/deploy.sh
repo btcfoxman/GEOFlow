@@ -118,8 +118,8 @@ export IMAGE_TAG="${IMAGE_TAG:-test-latest}"
 log "Validating compose config"
 docker compose config >/dev/null
 
-log "Pulling application images"
-retry 8 15 docker compose pull app web
+log "Pulling application and database images"
+retry 8 15 docker compose pull geoflow-db app web
 
 log "Running database migrations and one-time install"
 docker compose run --rm init
