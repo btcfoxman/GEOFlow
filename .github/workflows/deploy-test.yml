@@ -25,6 +25,7 @@ jobs:
     name: Run contract tests
     runs-on: ubuntu-latest
     env:
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
       BROADCAST_CONNECTION: 'null'
     steps:
       - name: Checkout
